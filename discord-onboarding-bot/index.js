@@ -18,7 +18,7 @@ client.once('ready', () => {
   startAutoShutdownTimer();
 });
 
-// 👋 Assign "Missing Info" role and send welcome message on join
+// 👋 Assign "Missing Info" role and greet in #❓-missing-info
 client.on('guildMemberAdd', async (member) => {
   const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
   const welcomeChannel = member.guild.channels.cache.find(c => c.name === '❓-missing-info');
@@ -35,7 +35,7 @@ client.on('guildMemberAdd', async (member) => {
   }
 });
 
-// 🧠 Onboarding flow on user message
+// 🧠 Onboarding
 const collectors = new Map();
 
 client.on('messageCreate', async (message) => {
@@ -72,23 +72,52 @@ client.on('messageCreate', async (message) => {
 
     await member.setNickname(`${first} ${last}`);
 
-    const roleName = `${year}`;
-    let gradRole = member.guild.roles.cache.find(role => role.name === roleName);
-
+    // Create/assign graduation year role
+    const yearRoleName = `${year}`;
+    let gradRole = member.guild.roles.cache.find(role => role.name === yearRoleName);
     if (!gradRole) {
       gradRole = await member.guild.roles.create({
-        name: roleName,
+        name: yearRoleName,
         color: 'Random',
-        reason: `Auto-created for graduation year ${year}`,
+        reason: `Auto-created for graduation year ${year}`
       });
     }
-
     await member.roles.add(gradRole);
 
+    // Determine Active or Alumni
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 0-indexed → Jan = 0
+    let statusRoleName;
+
+    if (year < currentYear) {
+      statusRoleName = 'Alumni';
+    } else if (year > currentYear) {
+      statusRoleName = 'Active';
+    } else {
+      statusRoleName = currentMonth <= 5 ? 'Active' : 'Alumni'; // Jan–May = Active, June+ = Alumni
+    }
+
+    const statusRole = member.guild.roles.cache.find(role => role.name === statusRoleName);
+    if (statusRole) {
+      await member.roles.add(statusRole);
+    } else {
+      console.warn(`⚠️ Could not find role: ${statusRoleName}`);
+    }
+
+    // Remove "Missing Info"
     const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
-    await message.channel.send(`🎓 Welcome, ${first}! You've been added to **${year}**.`);
+    // Public welcome message
+    const everyoneChannel = member.guild.channels.cache.find(c => c.name === '💬-everyone');
+    if (everyoneChannel?.isTextBased()) {
+      await everyoneChannel.send(
+        `🎉 Welcome <@${member.id}> to the server! Everyone say hi! 👋`
+      );
+    }
+
+    await message.channel.send(`🎓 Thanks, ${first}! You’ve been onboarded and assigned to **${year}** and **${statusRoleName}**.`);
   } catch (err) {
     console.error(err);
     await message.channel.send("⚠️ Something went wrong. Please try again.");
@@ -97,7 +126,7 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// 🔔 Reminder every 48 hours at 12:00 PM ET
+// 🔁 Reminder every 48h at 12PM ET
 cron.schedule('0 12 */2 * *', async () => {
   const guild = client.guilds.cache.first();
   if (!guild) return;
@@ -125,13 +154,12 @@ cron.schedule('0 12 */2 * *', async () => {
   timezone: "America/New_York"
 });
 
-// ⏱ Auto-shutdown at 11:00 PM ET
+// 🕐 Shutdown at 11PM ET
 function startAutoShutdownTimer() {
   setInterval(() => {
     const now = new Date();
     const utcHour = now.getUTCHours();
     const estHour = (utcHour - 4 + 24) % 24;
-
     if (estHour === 23) {
       console.log("🛑 It's 11:00 PM ET — shutting down to save Railway hours.");
       process.exit(0);
