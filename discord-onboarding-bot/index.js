@@ -15,6 +15,7 @@ const client = new Client({
 
 client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  startAutoShutdownTimer();
 });
 
 // Auto-assign "Missing Info" role on join
@@ -91,7 +92,7 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// 🔁 Scheduled reminder every 48 hours at 12 PM ET
+// Reminder every 48 hours at 12:00 PM ET
 cron.schedule('0 12 */2 * *', async () => {
   const guild = client.guilds.cache.first();
   if (!guild) return;
@@ -118,5 +119,19 @@ cron.schedule('0 12 */2 * *', async () => {
 }, {
   timezone: "America/New_York"
 });
+
+// 🔌 Automatically shut down at 11:00 PM ET daily
+function startAutoShutdownTimer() {
+  setInterval(() => {
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const estHour = (utcHour - 4 + 24) % 24; // Convert to ET manually
+
+    if (estHour === 23) {
+      console.log("🛑 It's 11:00 PM ET — shutting down to save Railway hours.");
+      process.exit(0);
+    }
+  }, 60 * 1000); // Check every 1 minute
+}
 
 client.login(process.env.BOT_TOKEN);
