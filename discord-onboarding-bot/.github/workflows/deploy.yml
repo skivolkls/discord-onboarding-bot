@@ -1,0 +1,19 @@
+name: Daily Redeploy at 8:01 AM ET
+
+on:
+  schedule:
+    - cron: '1 12 * * *'  # 12:01 UTC = 8:01 AM ET
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force Redeploy
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "Redeploy Bot"
+          echo "// redeploy $(date)" >> redeploy.txt
+          git add redeploy.txt
+          git commit -m "Automated redeploy at $(date)"
+          git push
