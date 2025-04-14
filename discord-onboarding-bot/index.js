@@ -18,16 +18,24 @@ client.once('ready', () => {
   startAutoShutdownTimer();
 });
 
-// Auto-assign "Missing Info" role on join
+// 👋 Assign "Missing Info" role and send welcome message on join
 client.on('guildMemberAdd', async (member) => {
   const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
+  const welcomeChannel = member.guild.channels.cache.find(c => c.name === '❓-missing-info');
+
   if (missingInfoRole) {
     await member.roles.add(missingInfoRole);
     console.log(`Assigned 'Missing Info' role to ${member.user.tag}`);
   }
+
+  if (welcomeChannel?.isTextBased()) {
+    await welcomeChannel.send(
+      `👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`
+    );
+  }
 });
 
-// Collect user input for onboarding
+// 🧠 Onboarding flow on user message
 const collectors = new Map();
 
 client.on('messageCreate', async (message) => {
@@ -62,10 +70,8 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // Set nickname
     await member.setNickname(`${first} ${last}`);
 
-    // Assign or create graduation year role
     const roleName = `${year}`;
     let gradRole = member.guild.roles.cache.find(role => role.name === roleName);
 
@@ -79,7 +85,6 @@ client.on('messageCreate', async (message) => {
 
     await member.roles.add(gradRole);
 
-    // Remove "Missing Info"
     const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
@@ -92,7 +97,7 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// Reminder every 48 hours at 12:00 PM ET
+// 🔔 Reminder every 48 hours at 12:00 PM ET
 cron.schedule('0 12 */2 * *', async () => {
   const guild = client.guilds.cache.first();
   if (!guild) return;
@@ -120,18 +125,18 @@ cron.schedule('0 12 */2 * *', async () => {
   timezone: "America/New_York"
 });
 
-// 🔌 Automatically shut down at 11:00 PM ET daily
+// ⏱ Auto-shutdown at 11:00 PM ET
 function startAutoShutdownTimer() {
   setInterval(() => {
     const now = new Date();
     const utcHour = now.getUTCHours();
-    const estHour = (utcHour - 4 + 24) % 24; // Convert to ET manually
+    const estHour = (utcHour - 4 + 24) % 24;
 
     if (estHour === 23) {
       console.log("🛑 It's 11:00 PM ET — shutting down to save Railway hours.");
       process.exit(0);
     }
-  }, 60 * 1000); // Check every 1 minute
+  }, 60 * 1000);
 }
 
 client.login(process.env.BOT_TOKEN);
