@@ -16,22 +16,31 @@ const client = new Client({
 client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   startAutoShutdownTimer();
+  startReminderCron();
 });
 
 client.on('guildMemberAdd', async (member) => {
-  const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
-  const welcomeChannel = member.guild.channels.cache.find(c => c.name === '❓-missing-info');
+  const guild = member.guild;
+  const missingInfoRole = guild.roles.cache.find(role => role.name === 'Missing Info');
+  const newMembersChannel = guild.channels.cache.find(c => c.name === '❓-new-members');
 
   if (missingInfoRole) {
     await member.roles.add(missingInfoRole);
-    console.log(`Assigned 'Missing Info' role to ${member.user.tag}`);
+    console.log(`✅ Assigned 'Missing Info' role to ${member.user.tag}`);
   }
 
-  if (welcomeChannel?.isTextBased()) {
-    await welcomeChannel.send(
-      `👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`
-    );
-    beginOnboarding(member, welcomeChannel);
+  if (newMembersChannel?.isTextBased()) {
+    await newMembersChannel.send(`👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`);
+    beginOnboarding(member, newMembersChannel);
+  }
+});
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  // 🟡 Manual trigger keyword for admins
+  if (message.content.trim().toUpperCase() === 'CLVEN') {
+    await promptMissingInfoUsers(message.guild);
   }
 });
 
@@ -53,100 +62,90 @@ async function beginOnboarding(member, channel) {
     const year = parseInt(yearInput);
 
     if (!first || !last || isNaN(year)) {
-      await channel.send("❌ Invalid input. Please try again or contact an admin.");
+      await channel.send("⚠️ Could not complete onboarding. Please try again or contact an admin.");
       return;
     }
 
     await member.setNickname(`${first} ${last}`);
 
-    const yearRoleName = `${year}`;
-    let gradRole = member.guild.roles.cache.find(role => role.name === yearRoleName);
-    if (!gradRole) {
-      gradRole = await member.guild.roles.create({
-        name: yearRoleName,
-        color: 'Random',
-        reason: `Auto-created for graduation year ${year}`
-      });
-    }
-    await member.roles.add(gradRole);
+    // Assign or create grad year role
+    const yearRole = member.guild.roles.cache.find(r => r.name === `${year}`) ||
+      await member.guild.roles.create({ name: `${year}`, reason: 'Auto-onboarding' });
+    await member.roles.add(yearRole);
 
-    // Active or Alumni logic
+    // Determine Active vs Alumni
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    let statusRoleName;
+    const cutoff = new Date(currentYear, 5, 1); // June 1st
+    let statusRoleName = 'Alumni';
 
-    if (year < currentYear) {
-      statusRoleName = 'Alumni';
-    } else if (year > currentYear) {
+    if (year > currentYear) {
       statusRoleName = 'Active';
-    } else {
-      statusRoleName = currentMonth <= 5 ? 'Active' : 'Alumni';
+    } else if (year === currentYear && now < cutoff) {
+      statusRoleName = 'Active';
     }
 
-    const statusRole = member.guild.roles.cache.find(role => role.name === statusRoleName);
-    if (statusRole) {
-      await member.roles.add(statusRole);
-    } else {
-      console.warn(`⚠️ Could not find role: ${statusRoleName}`);
-    }
+    const statusRole = member.guild.roles.cache.find(r => r.name === statusRoleName);
+    if (statusRole) await member.roles.add(statusRole);
 
-    const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
+    // Remove Missing Info role
+    const missingInfoRole = member.guild.roles.cache.find(r => r.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
-    const announcementChannel = member.guild.channels.cache.find(c => c.name === '📢-announcements');
-    if (announcementChannel?.isTextBased()) {
-      await announcementChannel.send(
-        `🎉 **Welcome Brother <@${member.id}>, class of ${year}!**`
-      );
+    // Welcome message in 📢-announcements
+    const announcements = member.guild.channels.cache.find(c => c.name === '📢-announcements');
+    if (announcements?.isTextBased()) {
+      await announcements.send(`🎉 Welcome Brother <@${member.id}>, class of ${year}!`);
     }
 
     await channel.send(`🎓 Thanks, ${first}! You’ve been onboarded and assigned to **${year}** and **${statusRoleName}**.`);
+    console.log(`🎓 Onboarded ${member.user.tag} as ${first} ${last}, ${year} (${statusRoleName})`);
   } catch (err) {
-    console.error(err);
-    await channel.send("⚠️ Something went wrong. Please try again.");
+    console.error("❌ Onboarding failed:", err);
+    await channel.send("⚠️ Something went wrong. Please try again or contact an admin.");
   }
 }
 
-// 🔁 Reminder every 48h at 12PM ET
-cron.schedule('0 12 */2 * *', async () => {
-  const guild = client.guilds.cache.first();
-  if (!guild) return;
+// 🔁 Daily reminder at 12 PM ET + Manual trigger support
+function startReminderCron() {
+  cron.schedule('0 12 * * *', async () => {
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+    await promptMissingInfoUsers(guild);
+  }, {
+    timezone: "America/New_York"
+  });
+}
 
-  const missingInfoRole = guild.roles.cache.find(r => r.name === 'Missing Info');
-  const verifyChannel = guild.channels.cache.find(c => c.name === '❓-missing-info');
+async function promptMissingInfoUsers(guild) {
+  const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
+  const channel = guild.channels.cache.find(c => c.name === '❓-new-members');
+  if (!missingRole || !channel?.isTextBased()) return;
 
-  if (!missingInfoRole || !verifyChannel?.isTextBased()) return;
-
-  const members = await guild.members.fetch();
-  const stuckUsers = members.filter(member =>
-    member.roles.cache.has(missingInfoRole.id) && !member.user.bot
-  );
-
-  if (stuckUsers.size > 0) {
-    await verifyChannel.send(`🔔 **Reminder to complete onboarding:**`);
-    for (const member of stuckUsers.values()) {
-      await verifyChannel.send(`<@${member.id}> — please respond to the onboarding questions so we can get you set up!`);
-    }
-    console.log(`✅ Reminder sent to ${stuckUsers.size} user(s).`);
-  } else {
-    console.log('✅ No users with Missing Info role found at reminder time.');
+  const members = missingRole.members.filter(member => !member.user.bot);
+  if (members.size === 0) {
+    console.log("✅ No users in 'Missing Info' at prompt time.");
+    return;
   }
-}, {
-  timezone: "America/New_York"
-});
 
-// 🕐 Shutdown at 11PM ET
+  await channel.send(`🔔 **Reminder to complete onboarding:**`);
+  for (const member of members.values()) {
+    await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!`);
+  }
+
+  console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
+}
+
+// ⏱ Auto shutdown at 11 PM ET
 function startAutoShutdownTimer() {
   setInterval(() => {
     const now = new Date();
-    const utcHour = now.getUTCHours();
-    const estHour = (utcHour - 4 + 24) % 24;
-    if (estHour === 23) {
+    const estHour = (now.getUTCHours() - 4 + 24) % 24;
+    if (estHour === 23 && now.getMinutes() === 0) {
       console.log("🛑 It's 11:00 PM ET — shutting down to save Railway hours.");
       process.exit(0);
     }
-  }, 60 * 1000);
+  }, 60000);
 }
 
-client.login(process.env.BOT_TOKEN);
+client.login(process.env.DISCORD_TOKEN);
