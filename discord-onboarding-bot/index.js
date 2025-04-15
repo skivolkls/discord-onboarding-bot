@@ -18,7 +18,6 @@ client.once('ready', () => {
   startAutoShutdownTimer();
 });
 
-// 👋 Assign "Missing Info" role and greet in #❓-missing-info
 client.on('guildMemberAdd', async (member) => {
   const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
   const welcomeChannel = member.guild.channels.cache.find(c => c.name === '❓-missing-info');
@@ -32,26 +31,14 @@ client.on('guildMemberAdd', async (member) => {
     await welcomeChannel.send(
       `👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`
     );
+    beginOnboarding(member, welcomeChannel);
   }
 });
 
-// 🧠 Onboarding
-const collectors = new Map();
-
-client.on('messageCreate', async (message) => {
-  if (message.channel.name !== '❓-missing-info') return;
-  if (message.author.bot) return;
-
-  const member = message.member;
-  const hasMissingInfo = member.roles.cache.some(role => role.name === 'Missing Info');
-  if (!hasMissingInfo) return;
-
-  if (collectors.has(member.id)) return;
-  collectors.set(member.id, true);
-
+async function beginOnboarding(member, channel) {
   const ask = async (question) => {
-    await message.channel.send(`<@${member.id}>, ${question}`);
-    const collected = await message.channel.awaitMessages({
+    await channel.send(`<@${member.id}>, ${question}`);
+    const collected = await channel.awaitMessages({
       filter: m => m.author.id === member.id,
       max: 1,
       time: 60000
@@ -66,13 +53,12 @@ client.on('messageCreate', async (message) => {
     const year = parseInt(yearInput);
 
     if (!first || !last || isNaN(year)) {
-      await message.channel.send("❌ Invalid input. Please try again or contact an admin.");
+      await channel.send("❌ Invalid input. Please try again or contact an admin.");
       return;
     }
 
     await member.setNickname(`${first} ${last}`);
 
-    // Create/assign graduation year role
     const yearRoleName = `${year}`;
     let gradRole = member.guild.roles.cache.find(role => role.name === yearRoleName);
     if (!gradRole) {
@@ -84,10 +70,10 @@ client.on('messageCreate', async (message) => {
     }
     await member.roles.add(gradRole);
 
-    // Determine Active or Alumni
+    // Active or Alumni logic
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1; // 0-indexed → Jan = 0
+    const currentMonth = now.getMonth() + 1;
     let statusRoleName;
 
     if (year < currentYear) {
@@ -95,7 +81,7 @@ client.on('messageCreate', async (message) => {
     } else if (year > currentYear) {
       statusRoleName = 'Active';
     } else {
-      statusRoleName = currentMonth <= 5 ? 'Active' : 'Alumni'; // Jan–May = Active, June+ = Alumni
+      statusRoleName = currentMonth <= 5 ? 'Active' : 'Alumni';
     }
 
     const statusRole = member.guild.roles.cache.find(role => role.name === statusRoleName);
@@ -105,26 +91,22 @@ client.on('messageCreate', async (message) => {
       console.warn(`⚠️ Could not find role: ${statusRoleName}`);
     }
 
-    // Remove "Missing Info"
     const missingInfoRole = member.guild.roles.cache.find(role => role.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
-    // Public welcome message
-    const everyoneChannel = member.guild.channels.cache.find(c => c.name === '💬-everyone');
-    if (everyoneChannel?.isTextBased()) {
-      await everyoneChannel.send(
-        `🎉 Welcome <@${member.id}> to the server! Everyone say hi! 👋`
+    const announcementChannel = member.guild.channels.cache.find(c => c.name === '📢-announcements');
+    if (announcementChannel?.isTextBased()) {
+      await announcementChannel.send(
+        `🎉 **Welcome Brother <@${member.id}>, class of ${year}!**`
       );
     }
 
-    await message.channel.send(`🎓 Thanks, ${first}! You’ve been onboarded and assigned to **${year}** and **${statusRoleName}**.`);
+    await channel.send(`🎓 Thanks, ${first}! You’ve been onboarded and assigned to **${year}** and **${statusRoleName}**.`);
   } catch (err) {
     console.error(err);
-    await message.channel.send("⚠️ Something went wrong. Please try again.");
-  } finally {
-    collectors.delete(member.id);
+    await channel.send("⚠️ Something went wrong. Please try again.");
   }
-});
+}
 
 // 🔁 Reminder every 48h at 12PM ET
 cron.schedule('0 12 */2 * *', async () => {
