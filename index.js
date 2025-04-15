@@ -22,7 +22,7 @@ client.once('ready', () => {
 client.on('guildMemberAdd', async (member) => {
   const guild = member.guild;
   const missingInfoRole = guild.roles.cache.find(role => role.name === 'Missing Info');
-  const newMembersChannel = guild.channels.cache.find(c => c.name === '❓-new-members');
+  const newMembersChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
 
   if (missingInfoRole) {
     await member.roles.add(missingInfoRole);
@@ -121,7 +121,7 @@ async function promptMissingInfoUsers(guild) {
   try {
     await guild.members.fetch(); // Ensure all members are cached
     const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
-    const channel = guild.channels.cache.find(c => c.name === '❓-new-members');
+    const channel = guild.channels.cache.find(c => c.name === '❓-onboarding');
     if (!missingRole || !channel?.isTextBased()) return;
 
     const members = guild.members.cache.filter(member =>
