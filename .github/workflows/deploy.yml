@@ -1,3 +1,4 @@
+# Trigger GitHub Actions
 name: Daily Redeploy at 8:01 AM ET
 
 on:
