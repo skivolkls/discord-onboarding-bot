@@ -36,9 +36,9 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot || !message.guild) return;
 
-  // 🟡 Manual trigger keyword for admins
+  // 🟡 Manual keyword trigger: "CLVEN"
   if (message.content.trim().toUpperCase() === 'CLVEN') {
     await promptMissingInfoUsers(message.guild);
   }
@@ -118,22 +118,30 @@ function startReminderCron() {
 }
 
 async function promptMissingInfoUsers(guild) {
-  const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
-  const channel = guild.channels.cache.find(c => c.name === '❓-new-members');
-  if (!missingRole || !channel?.isTextBased()) return;
+  try {
+    await guild.members.fetch(); // Ensure all members are cached
+    const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
+    const channel = guild.channels.cache.find(c => c.name === '❓-new-members');
+    if (!missingRole || !channel?.isTextBased()) return;
 
-  const members = missingRole.members.filter(member => !member.user.bot);
-  if (members.size === 0) {
-    console.log("✅ No users in 'Missing Info' at prompt time.");
-    return;
+    const members = guild.members.cache.filter(member =>
+      member.roles.cache.has(missingRole.id) && !member.user.bot
+    );
+
+    if (members.size === 0) {
+      console.log("✅ No users in 'Missing Info' at prompt time.");
+      return;
+    }
+
+    await channel.send(`🔔 **Reminder to complete onboarding:**`);
+    for (const member of members.values()) {
+      await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!`);
+    }
+
+    console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
+  } catch (err) {
+    console.error("❌ Error during manual/daily prompt:", err);
   }
-
-  await channel.send(`🔔 **Reminder to complete onboarding:**`);
-  for (const member of members.values()) {
-    await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!`);
-  }
-
-  console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
 }
 
 // ⏱ Auto shutdown at 11 PM ET
