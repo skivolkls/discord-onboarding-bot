@@ -38,9 +38,27 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // 🟡 Manual keyword trigger: "CLVEN"
-  if (message.content.trim().toUpperCase() === 'CLVEN') {
+  const content = message.content.trim().toUpperCase();
+
+  // 🟡 Manual keyword trigger
+  if (content === 'CLVEN') {
     await promptMissingInfoUsers(message.guild);
+  }
+
+  // ✅ Bot status command
+  if (content === 'BOT STATUS') {
+    const guild = message.guild;
+    await guild.members.fetch();
+    const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
+    const count = missingRole ? missingRole.members.filter(m => !m.user.bot).size : 0;
+
+    await message.channel.send(
+      `🟢 Bot is online and running.\n` +
+      `👥 Users with 'Missing Info': ${count}\n` +
+      `🕛 Next daily reminder: 12:00 PM ET\n` +
+      `🔁 Auto-shutdown: 11:00 PM ET\n` +
+      `📡 Manual prompt keyword: CLVEN`
+    );
   }
 });
 
@@ -68,12 +86,10 @@ async function beginOnboarding(member, channel) {
 
     await member.setNickname(`${first} ${last}`);
 
-    // Assign or create grad year role
     const yearRole = member.guild.roles.cache.find(r => r.name === `${year}`) ||
       await member.guild.roles.create({ name: `${year}`, reason: 'Auto-onboarding' });
     await member.roles.add(yearRole);
 
-    // Determine Active vs Alumni
     const now = new Date();
     const currentYear = now.getFullYear();
     const cutoff = new Date(currentYear, 5, 1); // June 1st
@@ -88,11 +104,9 @@ async function beginOnboarding(member, channel) {
     const statusRole = member.guild.roles.cache.find(r => r.name === statusRoleName);
     if (statusRole) await member.roles.add(statusRole);
 
-    // Remove Missing Info role
     const missingInfoRole = member.guild.roles.cache.find(r => r.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
-    // Welcome message in 📢-announcements
     const announcements = member.guild.channels.cache.find(c => c.name === '📢-announcements');
     if (announcements?.isTextBased()) {
       await announcements.send(`🎉 Welcome Brother <@${member.id}>, class of ${year}!`);
@@ -106,7 +120,6 @@ async function beginOnboarding(member, channel) {
   }
 }
 
-// 🔁 Daily reminder at 12 PM ET + Manual trigger support
 function startReminderCron() {
   cron.schedule('0 12 * * *', async () => {
     const guild = client.guilds.cache.first();
@@ -119,7 +132,7 @@ function startReminderCron() {
 
 async function promptMissingInfoUsers(guild) {
   try {
-    await guild.members.fetch(); // Ensure all members are cached
+    await guild.members.fetch(); // Ensure full member list
     const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
     const channel = guild.channels.cache.find(c => c.name === '❓-onboarding');
     if (!missingRole || !channel?.isTextBased()) return;
@@ -140,11 +153,10 @@ async function promptMissingInfoUsers(guild) {
 
     console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
   } catch (err) {
-    console.error("❌ Error during manual/daily prompt:", err);
+    console.error("❌ Error during prompt:", err);
   }
 }
 
-// ⏱ Auto shutdown at 11 PM ET
 function startAutoShutdownTimer() {
   setInterval(() => {
     const now = new Date();
