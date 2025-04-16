@@ -13,6 +13,8 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
+const collectors = new Map();
+
 client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   startAutoShutdownTimer();
@@ -22,16 +24,16 @@ client.once('ready', () => {
 client.on('guildMemberAdd', async (member) => {
   const guild = member.guild;
   const missingInfoRole = guild.roles.cache.find(role => role.name === 'Missing Info');
-  const newMembersChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
+  const onboardingChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
 
   if (missingInfoRole) {
     await member.roles.add(missingInfoRole);
     console.log(`✅ Assigned 'Missing Info' role to ${member.user.tag}`);
   }
 
-  if (newMembersChannel?.isTextBased()) {
-    await newMembersChannel.send(`👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`);
-    beginOnboarding(member, newMembersChannel);
+  if (onboardingChannel?.isTextBased()) {
+    await onboardingChannel.send(`👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`);
+    beginOnboarding(member, onboardingChannel);
   }
 });
 
@@ -40,29 +42,23 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim().toUpperCase();
 
-  // 🟡 Manual keyword trigger
   if (content === 'CLVEN') {
     await promptMissingInfoUsers(message.guild);
   }
 
-  // ✅ Bot status command
   if (content === 'BOT STATUS') {
     const guild = message.guild;
-    await guild.members.fetch();
     const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
-    const count = missingRole ? missingRole.members.filter(m => !m.user.bot).size : 0;
-
-    await message.channel.send(
-      `🟢 Bot is online and running.\n` +
-      `👥 Users with 'Missing Info': ${count}\n` +
-      `🕛 Next daily reminder: 12:00 PM ET\n` +
-      `🔁 Auto-shutdown: 11:00 PM ET\n` +
-      `📡 Manual prompt keyword: CLVEN`
-    );
+    const missingCount = guild.members.cache.filter(m => m.roles.cache.has(missingRole?.id)).size;
+    await message.channel.send(`✅ Bot is online.\n👤 Users with 'Missing Info' role: ${missingCount}\n🕛 Daily reminders run at 12PM ET.\n📴 Auto shutdown occurs at 11PM ET.`);
   }
 });
 
 async function beginOnboarding(member, channel) {
+  if (collectors.has(member.id)) return;
+
+  collectors.set(member.id, true);
+
   const ask = async (question) => {
     await channel.send(`<@${member.id}>, ${question}`);
     const collected = await channel.awaitMessages({
@@ -74,9 +70,9 @@ async function beginOnboarding(member, channel) {
   };
 
   try {
-    const first = await ask("what's your **first name**?");
-    const last = await ask("what's your **last name**?");
-    const yearInput = await ask("what's your **graduation year**?");
+    const first = await ask("what’s your **first name**?");
+    const last = await ask("what’s your **last name**?");
+    const yearInput = await ask("what’s your **graduation year**?");
     const year = parseInt(yearInput);
 
     if (!first || !last || isNaN(year)) {
@@ -92,12 +88,10 @@ async function beginOnboarding(member, channel) {
 
     const now = new Date();
     const currentYear = now.getFullYear();
-    const cutoff = new Date(currentYear, 5, 1); // June 1st
+    const cutoff = new Date(currentYear, 5, 1);
     let statusRoleName = 'Alumni';
 
-    if (year > currentYear) {
-      statusRoleName = 'Active';
-    } else if (year === currentYear && now < cutoff) {
+    if (year > currentYear || (year === currentYear && now < cutoff)) {
       statusRoleName = 'Active';
     }
 
@@ -117,46 +111,49 @@ async function beginOnboarding(member, channel) {
   } catch (err) {
     console.error("❌ Onboarding failed:", err);
     await channel.send("⚠️ Something went wrong. Please try again or contact an admin.");
+  } finally {
+    collectors.delete(member.id);
   }
 }
 
+// 🔁 Daily reminder at 12PM ET
 function startReminderCron() {
   cron.schedule('0 12 * * *', async () => {
     const guild = client.guilds.cache.first();
-    if (!guild) return;
-    await promptMissingInfoUsers(guild);
-  }, {
-    timezone: "America/New_York"
-  });
+    if (guild) await promptMissingInfoUsers(guild);
+  }, { timezone: "America/New_York" });
 }
 
 async function promptMissingInfoUsers(guild) {
   try {
-    await guild.members.fetch(); // Ensure full member list
+    await guild.members.fetch();
     const missingRole = guild.roles.cache.find(r => r.name === 'Missing Info');
-    const channel = guild.channels.cache.find(c => c.name === '❓-onboarding');
-    if (!missingRole || !channel?.isTextBased()) return;
+    const onboardingChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
+    if (!missingRole || !onboardingChannel?.isTextBased()) return;
 
-    const members = guild.members.cache.filter(member =>
-      member.roles.cache.has(missingRole.id) && !member.user.bot
+    const stuckMembers = guild.members.cache.filter(m =>
+      m.roles.cache.has(missingRole.id) && !m.user.bot
     );
 
-    if (members.size === 0) {
+    if (stuckMembers.size === 0) {
       console.log("✅ No users in 'Missing Info' at prompt time.");
       return;
     }
 
-    await channel.send(`🔔 **Reminder to complete onboarding:**`);
-    for (const member of members.values()) {
-      await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!`);
+    await onboardingChannel.send(`🔔 **Reminder to complete onboarding:**`);
+
+    for (const member of stuckMembers.values()) {
+      await onboardingChannel.send(`⏰ <@${member.id}> what’s your **first name**? (Let’s get started!)`);
+      beginOnboarding(member, onboardingChannel);
     }
 
-    console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
+    console.log(`✅ Prompted ${stuckMembers.size} user(s) stuck in onboarding.`);
   } catch (err) {
     console.error("❌ Error during prompt:", err);
   }
 }
 
+// ⏱ Auto shutdown at 11PM ET
 function startAutoShutdownTimer() {
   setInterval(() => {
     const now = new Date();
