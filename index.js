@@ -42,17 +42,36 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim().toUpperCase();
 
+  // Manual keyword trigger
   if (content === 'CLVEN') {
     await promptMissingInfoUsers(message.guild);
     return;
   }
 
+  // BOT STATUS
   if (content === 'BOT STATUS') {
     const missingInfoRole = message.guild.roles.cache.find(r => r.name === 'Missing Info');
-    const count = message.guild.members.cache.filter(member =>
-      member.roles.cache.has(missingInfoRole?.id) && !member.user.bot
-    ).size;
-    message.channel.send(`✅ Bot is online.\n👥 ${count} user(s) still need onboarding.`);
+    if (!missingInfoRole) {
+      await message.channel.send(`⚠️ Could not find the "Missing Info" role.`);
+      return;
+    }
+
+    await message.guild.members.fetch(); // cache everyone
+
+    const usersNeedingOnboarding = message.guild.members.cache
+      .filter(member =>
+        member.roles.cache.has(missingInfoRole.id) &&
+        !member.user.bot
+      );
+
+    const count = usersNeedingOnboarding.size;
+    const list = usersNeedingOnboarding.map(m => `${m.user.username}#${m.user.discriminator}`).join('\n') || 'None';
+
+    await message.channel.send(
+      `🟢 Bot is online.\n` +
+      `👥 Users with "Missing Info": ${count}\n\n` +
+      `📋 **List of users needing onboarding:**\n${list}`
+    );
     return;
   }
 
