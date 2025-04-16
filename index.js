@@ -13,6 +13,8 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
+const collectors = new Map();
+
 client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   startAutoShutdownTimer();
@@ -22,16 +24,16 @@ client.once('ready', () => {
 client.on('guildMemberAdd', async (member) => {
   const guild = member.guild;
   const missingInfoRole = guild.roles.cache.find(role => role.name === 'Missing Info');
-  const newMembersChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
+  const onboardingChannel = guild.channels.cache.find(c => c.name === '❓-onboarding');
 
   if (missingInfoRole) {
     await member.roles.add(missingInfoRole);
     console.log(`✅ Assigned 'Missing Info' role to ${member.user.tag}`);
   }
 
-  if (newMembersChannel?.isTextBased()) {
-    await newMembersChannel.send(`👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`);
-    beginOnboarding(member, newMembersChannel);
+  if (onboardingChannel?.isTextBased()) {
+    await onboardingChannel.send(`👋 Welcome <@${member.id}>! Please answer the questions below to complete your onboarding and gain access to the server.`);
+    beginOnboarding(member, onboardingChannel);
   }
 });
 
@@ -47,28 +49,37 @@ client.on('messageCreate', async (message) => {
 
   if (content === 'BOT STATUS') {
     const missingInfoRole = message.guild.roles.cache.find(r => r.name === 'Missing Info');
-    await message.guild.members.fetch(); // cache
-    const count = message.guild.members.cache.filter(m => m.roles.cache.has(missingInfoRole?.id) && !m.user.bot).size;
-    await message.channel.send(`🟢 Bot is online.\n👥 Users with 'Missing Info': ${count}`);
+    const count = message.guild.members.cache.filter(member =>
+      member.roles.cache.has(missingInfoRole?.id) && !member.user.bot
+    ).size;
+    message.channel.send(`✅ Bot is online.\n👥 ${count} user(s) still need onboarding.`);
     return;
+  }
+
+  const hasCollector = collectors.has(message.author.id);
+  if (hasCollector) {
+    collectors.get(message.author.id)(message);
   }
 });
 
 async function beginOnboarding(member, channel) {
-  const ask = async (question) => {
-    await channel.send(`<@${member.id}>, ${question}`);
-    const collected = await channel.awaitMessages({
-      filter: m => m.author.id === member.id,
-      max: 1,
-      time: 60000
+  const ask = (question) => {
+    return new Promise((resolve) => {
+      channel.send(`<@${member.id}>, ${question}`);
+      const collector = (msg) => {
+        if (msg.author.id === member.id) {
+          collectors.delete(member.id);
+          resolve(msg.content.trim());
+        }
+      };
+      collectors.set(member.id, collector);
     });
-    return collected.first()?.content?.trim();
   };
 
   try {
-    const first = await ask("what’s your **first name**?");
-    const last = await ask("what’s your **last name**?");
-    const yearInput = await ask("what’s your **graduation year**?");
+    const first = await ask("What’s your **first name**?");
+    const last = await ask("What’s your **last name**?");
+    const yearInput = await ask("What’s your **graduation year**?");
     const year = parseInt(yearInput);
 
     if (!first || !last || isNaN(year)) {
@@ -78,15 +89,14 @@ async function beginOnboarding(member, channel) {
 
     await member.setNickname(`${first} ${last}`);
 
-    // Assign or create grad year role
     const yearRole = member.guild.roles.cache.find(r => r.name === `${year}`) ||
       await member.guild.roles.create({ name: `${year}`, reason: 'Auto-onboarding' });
     await member.roles.add(yearRole);
 
-    // Determine Active vs Alumni
     const now = new Date();
     const currentYear = now.getFullYear();
     const cutoff = new Date(currentYear, 5, 1); // June 1
+
     let statusRoleName = 'Alumni';
     if (year > currentYear || (year === currentYear && now < cutoff)) {
       statusRoleName = 'Active';
@@ -95,11 +105,9 @@ async function beginOnboarding(member, channel) {
     const statusRole = member.guild.roles.cache.find(r => r.name === statusRoleName);
     if (statusRole) await member.roles.add(statusRole);
 
-    // Remove Missing Info role
     const missingInfoRole = member.guild.roles.cache.find(r => r.name === 'Missing Info');
     if (missingInfoRole) await member.roles.remove(missingInfoRole);
 
-    // Welcome message in announcements
     const announcements = member.guild.channels.cache.find(c => c.name === '📢-announcements');
     if (announcements?.isTextBased()) {
       await announcements.send(`🎉 Welcome Brother <@${member.id}>, class of ${year}!`);
@@ -141,7 +149,8 @@ async function promptMissingInfoUsers(guild) {
 
     await channel.send(`🔔 **Reminder to complete onboarding:**`);
     for (const member of members.values()) {
-      await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!\n\nWhat’s your **first name**?`);
+      await channel.send(`⏰ <@${member.id}> please respond to the onboarding questions so we can get you full access!`);
+      beginOnboarding(member, channel);
     }
 
     console.log(`✅ Prompted ${members.size} user(s) stuck in onboarding.`);
